@@ -50,8 +50,8 @@
                   />
                 </div>
                 <div
-                  v-if="findCoin.length > 0"
-                  class="flex bg-white shadow-md p-1 rounded-md shadow-md flex-wrap"
+                  v-if="findCoin.length > 0 && ticker"
+                  class="flex bg-white p-1 rounded-md shadow-md flex-wrap"
                 >
                   <span
                     v-for="(item, idx) in findCoin"
@@ -90,9 +90,37 @@
           </section>
           <template v-if="cards.length">
             <hr class="w-full border-t border-gray-600 my-4" />
+            Фильтр:
+            <div class="flex items-center">
+              <input
+                v-model="filter"
+                @input="page = 1"
+                type="text"
+                name="wallet"
+                id="wallet"
+                class="pr-10 border-gray-300 text-gray-900 focus:outline-none focus:ring-gray-500 focus:border-gray-500 sm:text-sm rounded-md"
+              />
+              <div>
+                <button
+                  v-if="page > 1"
+                  @click="page--"
+                  class="ml-5 my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                >
+                  Назад
+                </button>
+                <button
+                  v-if="hasNextPage"
+                  @click="page++"
+                  class="ml-2 my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+                >
+                  Вперёд
+                </button>
+              </div>
+            </div>
+
             <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
               <div
-                v-for="(t, idx) in cards"
+                v-for="(t, idx) in paginatedCards"
                 :key="t.name"
                 @click="select(t)"
                 class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solidcursor-pointer"
@@ -138,7 +166,7 @@
             </h3>
             <div class="flex items-end border-gray-600 border-b border-l h-64">
               <div
-                v-for="(bar, index) in normalizedGraph()"
+                v-for="(bar, index) in normalizedGraph"
                 :key="index"
                 :style="{ height: `${bar}%` }"
                 class="bg-purple-800 border w-10"
@@ -190,32 +218,41 @@ export default {
       selected: null,
       graph: [],
       findCoin: [],
+      filter: '',
+      page: 1,
     };
   },
   methods: {
     getAllCoins() {
-      setTimeout(async () => {
-        const f = await fetch(
-          'https://min-api.cryptocompare.com/data/all/coinlist'
-        );
-        const dt = await f.json();
-        const cns = Object.getOwnPropertyNames(dt.Data);
-        for (const key in cns) {
-          this.coins.push(cns[key]);
-        }
+      if (!localStorage.getItem('allCoins')) {
+        setTimeout(async () => {
+          const f = await fetch(
+            'https://min-api.cryptocompare.com/data/all/coinlist'
+          );
+          const dt = await f.json();
+          const cns = Object.getOwnPropertyNames(dt.Data);
+          for (const key in cns) {
+            this.coins.push(cns[key]);
+          }
+          this.circle = false;
+          localStorage.setItem('allCoins', JSON.stringify(this.coins));
+        }, 100);
+      } else {
+        this.coins = JSON.parse(localStorage.getItem('allCoins'));
         this.circle = false;
-      }, 100);
+      }
     },
     findEqual() {
       this.chekCoin = false;
       this.findCoin.length = 0;
-      for (let i = 0; i < this.coins.length; i++) {
-        const con = this.coins[i];
-        if (con.includes(this.ticker.toUpperCase(), -1)) {
-          this.findCoin.push(con);
+      if (this.ticker)
+        for (let i = 0; i < this.coins.length; i++) {
+          const con = this.coins[i];
+          if (con.includes(this.ticker.toUpperCase(), -1)) {
+            this.findCoin.push(con);
+          }
+          if (this.findCoin.length == 4) break;
         }
-        if (this.findCoin.length == 4) break;
-      }
     },
     addCard() {
       const cardsName = [];
@@ -229,37 +266,31 @@ export default {
         }
       }
       chek = this.coins.includes(this.ticker.toUpperCase());
-      if (this.findCoin.length > 0 && chek) {
+      if (this.findCoin.length > 0 && chek && !this.chekCoin) {
         const currentTicker = { name: this.ticker.toUpperCase(), price: '-' };
-        this.cards.push(currentTicker);
-
-        setInterval(async () => {
-          const f = await fetch(
-            `https://min-api.cryptocompare.com/data/price?fsym=${currentTicker.name}&tsyms=USD&api_key=7655ddeb75bb9b91517c0031ed0b3ad085c7d1021541a1b810998ffbe406c0f1`
-          );
-          const data = await f.json();
-          this.cards.find((t) => t.name == currentTicker.name).price =
-            data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
-          this.graph.push();
-
-          if (this.selected?.name == currentTicker.name) {
-            this.graph.push(data.USD);
-          }
-        }, 5000);
-
-        this.ticker = '';
+        this.cards = [...this.cards, currentTicker];
+        this.requestCoinsPrice(currentTicker.name);
       }
     },
-    normalizedGraph() {
-      const minValue = Math.min(...this.graph);
-      const maxValue = Math.max(...this.graph);
-      return this.graph.map(
-        (price) => 5 + ((price - minValue) / (maxValue - minValue)) * 95
-      );
+    requestCoinsPrice(coinName) {
+      setInterval(async () => {
+        const f = await fetch(
+          `https://min-api.cryptocompare.com/data/price?fsym=${coinName}&tsyms=USD&api_key=7655ddeb75bb9b91517c0031ed0b3ad085c7d1021541a1b810998ffbe406c0f1`
+        );
+        const data = await f.json();
+        this.cards.find((t) => t.name == coinName).price =
+          data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
+        this.graph.push();
+
+        if (this.selected?.name == coinName) {
+          this.graph.push(data.USD);
+        }
+      }, 10000);
+
+      this.ticker = '';
     },
     select(tckr) {
       this.selected = tckr;
-      this.graph = [];
     },
     deleteCard(del) {
       this.cards = this.cards.filter((t) => t != del);
@@ -267,6 +298,82 @@ export default {
         this.selected = null;
       }
     },
+  },
+  computed: {
+    startIndex() {
+      return (this.page - 1) * 3;
+    },
+    endIndex() {
+      return this.page * 3;
+    },
+    filteredCards() {
+      return this.cards.filter((coin) =>
+        coin.name.includes(this.filter.toUpperCase())
+      );
+    },
+    paginatedCards() {
+      return this.filteredCards.slice(this.startIndex, this.endIndex);
+    },
+    hasNextPage() {
+      return this.filteredCards.length > this.endIndex;
+    },
+    normalizedGraph() {
+      const minValue = Math.min(...this.graph);
+      const maxValue = Math.max(...this.graph);
+      if (maxValue == minValue) {
+        return this.graph.map(() => 50);
+      }
+      return this.graph.map(
+        (price) => 5 + ((price - minValue) / (maxValue - minValue)) * 95
+      );
+    },
+    pageStateOptions() {
+      return {
+        filter: this.filter,
+        page: this.page,
+      };
+    },
+  },
+  watch: {
+    selected() {
+      this.graph = [];
+    },
+    paginatedCards() {
+      if (this.paginatedCards.length == 0 && this.page > 1) {
+        this.page--;
+      }
+    },
+    cards() {
+      localStorage.setItem('cryptonomikon-list', JSON.stringify(this.cards));
+    },
+
+    pageStateOptions(value) {
+      window.history.pushState(
+        null,
+        document.title,
+        `${window.location.pathname}?filter=${value.filter}&page=${value.page}`
+      );
+    },
+  },
+  created() {
+    const windowData = Object.fromEntries(
+      new URL(window.location).searchParams.entries()
+    );
+
+    if (windowData.filter) {
+      this.filter = windowData.filter;
+    }
+    if (windowData.page) {
+      this.page = windowData.page;
+    }
+
+    const localCards = localStorage.getItem('cryptonomikon-list');
+    if (localCards) {
+      this.cards = JSON.parse(localCards);
+      this.cards.forEach((element) => {
+        this.requestCoinsPrice(element.name);
+      });
+    }
   },
   mounted() {
     this.getAllCoins();
