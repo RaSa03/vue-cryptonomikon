@@ -40,7 +40,7 @@
                 <div class="mt-1 relative rounded-md shadow-md">
                   <input
                     v-model="ticker"
-                    @keydown.enter="addCard"
+                    @keydown.enter="addTicker"
                     @input="findEqual"
                     type="text"
                     name="wallet"
@@ -68,7 +68,7 @@
               </div>
             </div>
             <button
-              @click="addCard"
+              @click="addTicker"
               type="button"
               class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
             >
@@ -88,7 +88,7 @@
               Добавить
             </button>
           </section>
-          <template v-if="cards.length">
+          <template v-if="tickers.length">
             <hr class="w-full border-t border-gray-600 my-4" />
             Фильтр:
             <div class="flex items-center">
@@ -120,7 +120,7 @@
 
             <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
               <div
-                v-for="(t, idx) in paginatedCards"
+                v-for="(t, idx) in paginatedTickers"
                 :key="t.name"
                 @click="select(t)"
                 class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solidcursor-pointer"
@@ -133,12 +133,12 @@
                     {{ t.name }} - USD
                   </dt>
                   <dd class="mt-1 text-3xl font-semibold text-gray-900">
-                    {{ t.price }}
+                    {{ formatPrice(t.price) }}
                   </dd>
                 </div>
                 <div class="w-full border-t border-gray-200"></div>
                 <button
-                  @click.stop="deleteCard(t)"
+                  @click.stop="deleteTicker(t)"
                   class="flex items-center justify-center font-medium w-full bg-gray-100 px-4 py-4 sm:px-6 text-md text-gray-500 hover:text-gray-600 hover:bg-gray-200 hover:opacity-20 transition-all focus:outline-none"
                 >
                   <svg
@@ -207,6 +207,7 @@
 </template>
 
 <script>
+import { subscribeToTiker, unsubscribeFromTicker } from '@/api';
 export default {
   data() {
     return {
@@ -214,13 +215,40 @@ export default {
       circle: true,
       coins: [],
       ticker: '',
-      cards: [],
+      tickers: [],
       selected: null,
       graph: [],
       findCoin: [],
       filter: '',
       page: 1,
     };
+  },
+
+  created() {
+    const windowData = Object.fromEntries(
+      new URL(window.location).searchParams.entries()
+    );
+
+    if (windowData.filter) {
+      this.filter = windowData.filter;
+    }
+    if (windowData.page) {
+      this.page = windowData.page;
+    }
+
+    const localTickers = localStorage.getItem('cryptonomikon-list');
+
+    if (localTickers) {
+      this.tickers = JSON.parse(localTickers);
+      this.tickers.forEach((ticker) => {
+        subscribeToTiker(ticker.name, (newPrice) =>
+          this.updateTickers(ticker.name, newPrice)
+        );
+      });
+    }
+  },
+  mounted() {
+    this.getAllCoins();
   },
   methods: {
     getAllCoins() {
@@ -254,68 +282,73 @@ export default {
           if (this.findCoin.length == 4) break;
         }
     },
-    addCard() {
-      const cardsName = [];
+    select(tckr) {
+      this.selected = tckr;
+    },
+    addTicker() {
+      const tickersName = [];
       let chek = true;
-      for (let i = 0; i < this.cards.length; i++) {
-        const name = this.cards[i];
-        cardsName.push(name.name);
-        if (cardsName.includes(this.ticker.toUpperCase())) {
+      for (let i = 0; i < this.tickers.length; i++) {
+        const name = this.tickers[i];
+        tickersName.push(name.name);
+        if (tickersName.includes(this.ticker.toUpperCase())) {
           this.chekCoin = true;
           break;
         }
       }
       chek = this.coins.includes(this.ticker.toUpperCase());
+
       if (this.findCoin.length > 0 && chek && !this.chekCoin) {
         const currentTicker = { name: this.ticker.toUpperCase(), price: '-' };
-        this.cards = [...this.cards, currentTicker];
-        this.requestCoinsPrice(currentTicker.name);
+        this.tickers = [...this.tickers, currentTicker];
+        this.ticker = '';
+        this.filter = '';
+        subscribeToTiker(currentTicker.name, (newPrice) =>
+          this.updateTickers(currentTicker.name, newPrice)
+        );
       }
     },
-    requestCoinsPrice(coinName) {
-      setInterval(async () => {
-        const f = await fetch(
-          `https://min-api.cryptocompare.com/data/price?fsym=${coinName}&tsyms=USD&api_key=7655ddeb75bb9b91517c0031ed0b3ad085c7d1021541a1b810998ffbe406c0f1`
-        );
-        const data = await f.json();
-        this.cards.find((t) => t.name == coinName).price =
-          data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
-        this.graph.push();
-
-        if (this.selected?.name == coinName) {
-          this.graph.push(data.USD);
-        }
-      }, 10000);
-
-      this.ticker = '';
+    updateTickers(tickerName, price) {
+      this.tickers
+        .filter((t) => t.name == tickerName)
+        .forEach((t) => {
+          if (t === this.selected) {
+            this.graph.push(t.price);
+          }
+          t.price = price;
+        });
     },
-    select(tckr) {
-      this.selected = tckr;
+    formatPrice(price) {
+      if (price === '-') {
+        return price;
+      }
+      return price > 1 ? price.toFixed(2) : price.toPrecision(2);
     },
-    deleteCard(del) {
-      this.cards = this.cards.filter((t) => t != del);
-      if (del == this.selected) {
+    deleteTicker(TickerToRemove) {
+      this.tickers = this.tickers.filter((t) => t != TickerToRemove);
+      if (TickerToRemove == this.selected) {
         this.selected = null;
       }
+      unsubscribeFromTicker(TickerToRemove.name);
     },
   },
   computed: {
     startIndex() {
-      return (this.page - 1) * 3;
+      return (this.page - 1) * 6;
     },
     endIndex() {
-      return this.page * 3;
+      return this.page * 6;
     },
-    filteredCards() {
-      return this.cards.filter((coin) =>
+    filteredTickers() {
+      return this.tickers.filter((coin) =>
         coin.name.includes(this.filter.toUpperCase())
       );
     },
-    paginatedCards() {
-      return this.filteredCards.slice(this.startIndex, this.endIndex);
+    paginatedTickers() {
+      return this.filteredTickers.slice(this.startIndex, this.endIndex);
     },
     hasNextPage() {
-      return this.filteredCards.length > this.endIndex;
+      return this.filteredTickers.length > this.endIndex;
     },
     normalizedGraph() {
       const minValue = Math.min(...this.graph);
@@ -338,13 +371,13 @@ export default {
     selected() {
       this.graph = [];
     },
-    paginatedCards() {
-      if (this.paginatedCards.length == 0 && this.page > 1) {
+    paginatedTickers() {
+      if (this.paginatedTickers.length == 0 && this.page > 1) {
         this.page--;
       }
     },
-    cards() {
-      localStorage.setItem('cryptonomikon-list', JSON.stringify(this.cards));
+    tickers() {
+      localStorage.setItem('cryptonomikon-list', JSON.stringify(this.tickers));
     },
 
     pageStateOptions(value) {
@@ -354,29 +387,6 @@ export default {
         `${window.location.pathname}?filter=${value.filter}&page=${value.page}`
       );
     },
-  },
-  created() {
-    const windowData = Object.fromEntries(
-      new URL(window.location).searchParams.entries()
-    );
-
-    if (windowData.filter) {
-      this.filter = windowData.filter;
-    }
-    if (windowData.page) {
-      this.page = windowData.page;
-    }
-
-    const localCards = localStorage.getItem('cryptonomikon-list');
-    if (localCards) {
-      this.cards = JSON.parse(localCards);
-      this.cards.forEach((element) => {
-        this.requestCoinsPrice(element.name);
-      });
-    }
-  },
-  mounted() {
-    this.getAllCoins();
   },
 };
 </script>
