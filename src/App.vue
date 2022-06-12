@@ -67,26 +67,7 @@
                 </div>
               </div>
             </div>
-            <button
-              @click="addTicker"
-              type="button"
-              class="my-4 inline-flex items-center py-2 px-4 border border-transparent shadow-sm text-sm leading-4 font-medium rounded-full text-white bg-gray-600 hover:bg-gray-700 transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
-            >
-              <!-- Heroicon name: solid/mail -->
-              <svg
-                class="-ml-0.5 mr-2 h-6 w-6"
-                xmlns="http://www.w3.org/2000/svg"
-                width="30"
-                height="30"
-                viewBox="0 0 24 24"
-                fill="#ffffff"
-              >
-                <path
-                  d="M13 7h-2v4H7v2h4v4h2v-4h4v-2h-4V7zm-1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"
-                ></path>
-              </svg>
-              Добавить
-            </button>
+            <add-button @click="addTicker" type="button" />
           </section>
           <template v-if="tickers.length">
             <hr class="w-full border-t border-gray-600 my-4" />
@@ -126,6 +107,7 @@
                 class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solidcursor-pointer"
                 :class="{
                   'border-4': selected == t,
+                  'bg-red-100': t.price == '-',
                 }"
               >
                 <div class="px-4 py-5 sm:p-6 text-center">
@@ -164,12 +146,15 @@
             <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
               {{ selected.name }} - USD
             </h3>
-            <div class="flex items-end border-gray-600 border-b border-l h-64">
+            <div
+              class="flex items-end border-gray-600 border-b border-l h-64"
+              ref="graph"
+            >
               <div
                 v-for="(bar, index) in normalizedGraph"
                 :key="index"
                 :style="{ height: `${bar}%` }"
-                class="bg-purple-800 border w-10"
+                class="bg-purple-800 border w-5"
               ></div>
             </div>
             <button
@@ -208,7 +193,9 @@
 
 <script>
 import { subscribeToTiker, unsubscribeFromTicker } from '@/api';
+import AddButton from '@/components/AddButton.vue';
 export default {
+  components: { AddButton },
   data() {
     return {
       chekCoin: false,
@@ -221,6 +208,7 @@ export default {
       findCoin: [],
       filter: '',
       page: 1,
+      maxGraphElements: 1,
     };
   },
 
@@ -249,6 +237,10 @@ export default {
   },
   mounted() {
     this.getAllCoins();
+    window.addEventListener('resize', this.calculateMaxGraphElements);
+  },
+  beforeUnmount() {
+    window.removeEventListener('resize', this.calculateMaxGraphElements);
   },
   methods: {
     getAllCoins() {
@@ -296,9 +288,9 @@ export default {
           break;
         }
       }
-      chek = this.coins.includes(this.ticker.toUpperCase());
+      // chek = this.coins.includes(this.ticker.toUpperCase());
 
-      if (this.findCoin.length > 0 && chek && !this.chekCoin) {
+      if (!this.chekCoin) {
         const currentTicker = { name: this.ticker.toUpperCase(), price: '-' };
         this.tickers = [...this.tickers, currentTicker];
         this.ticker = '';
@@ -308,12 +300,28 @@ export default {
         );
       }
     },
+    calculateMaxGraphElements() {
+      if (!this.$refs.graph) {
+        return;
+      }
+      this.maxGraphElements = this.$refs.graph.clientWidth / 20;
+      if (this.graph.length > this.maxGraphElements) {
+        this.graph = this.graph.slice(
+          this.graph.length - this.maxGraphElements
+        );
+      }
+    },
     updateTickers(tickerName, price) {
       this.tickers
         .filter((t) => t.name == tickerName)
         .forEach((t) => {
           if (t === this.selected) {
             this.graph.push(t.price);
+            if (this.graph.length > this.maxGraphElements) {
+              this.graph = this.graph.slice(
+                this.graph.length - this.maxGraphElements
+              );
+            }
           }
           t.price = price;
         });
@@ -370,6 +378,10 @@ export default {
   watch: {
     selected() {
       this.graph = [];
+      // setTimeout(() => {  //ждем отображения DOM
+      //   this.calculateMaxGraphElements();
+      // });
+      this.$nextTick().then(() => this.calculateMaxGraphElements()); //тоже самое
     },
     paginatedTickers() {
       if (this.paginatedTickers.length == 0 && this.page > 1) {
